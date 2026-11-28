@@ -104,3 +104,35 @@ python langgraph_agent.py    # 单 Agent
 python langgraph_multi.py    # 双 Agent
 python eval_multi.py         # 批量评测，看打回率
 ```
+
+## 故障注入实验
+
+把工具故意弄坏，看 Agent 会不会崩、会不会编。
+
+### 做法
+
+`search_layer.py` 加开关：
+
+```python
+_mode = os.getenv("FAULT_MODE", "")
+if _mode == "error":
+    raise RuntimeError("模拟：搜索接口 500")
+if _mode == "empty":
+    return []
+```
+
+### 五组结果
+
+| 场景 | 行为 |
+|---|---|
+| error，未处理 | 进程崩溃 |
+| error + `handle_tool_errors=True` | 3 次失败后主动放弃 |
+| empty，单 Agent | 10 次全空，退到单字「AI」确认故障后拒绝 |
+| empty，双 Agent（旧规则） | 审稿人判不通过，打回 2 次 |
+| empty，双 Agent（新规则） | 判通过，交付「无法完成」说明 |
+
+### 三个发现
+
+1. **框架默认值不一定是你想要的**：`ToolNode` 默认把工具异常往外抛，一个接口抖动就能让流程挂掉；手写版的 try/except 反而更健壮。
+2. **模型没资料时不编**：先降级重试确认是工具故障，再拒绝写报告。原话：「凭记忆写『Gartner 说 xx%』，等于编造引用，比交白卷危害更大。」
+3. **规则过严会惩罚正确行为**：「必须有参考来源」对「调研无法完成」的说明是错的，它本来就没有资料可引。`passed` 的含义是「能不能交付」，不是「写得好不好」。

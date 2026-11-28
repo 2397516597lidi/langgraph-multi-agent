@@ -11,6 +11,14 @@ SEARCH_URL = "https://api.deepseek.com/v1/tools/search"
 
 def search(query,count=10):
     """调 Search 接口，返回 results 列表"""
+
+    # ===== 故障注入（测试用，环境变量为空时不生效）=====
+    _mode=os.getenv("FAULT_MODE","")
+    if _mode=="error":
+        raise RuntimeError("模拟：搜索接口 500")
+    if _mode=="empty":
+        return []
+
     resp=requests.post(SEARCH_URL,timeout=60,headers={
         "Authorization": f"Bearer {KEY}",
         "Content-Type": "application/json",

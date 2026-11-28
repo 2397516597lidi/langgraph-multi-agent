@@ -100,7 +100,7 @@ def agent_node(state:MessagesState):
 def build_graph():
     g=StateGraph(MessagesState)
     g.add_node("agent",agent_node)
-    g.add_node("tools",ToolNode(TOOLS_LIST))
+    g.add_node("tools",ToolNode(TOOLS_LIST,handle_tool_errors=True))
 
     g.add_edge(START,"agent")
     #模型要调工具就去tools,写完报告（无tool_calls）就结束

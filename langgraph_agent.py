@@ -3,6 +3,17 @@ import os
 import json
 import requests
 from datetime import datetime, timezone
+import time
+from pathlib import Path
+
+TRACE=Path(__file__).parent/"traces"/"trace.jsonl"
+
+#记录日志文件
+def _log(kind,**kw):
+    TRACE.parent.mkdir(exist_ok=True)
+    rec={"ts":round(time.time(),1),"kind":kind,**kw}
+    with open(TRACE,"a",encoding="utf-8") as f:
+        f.write(json.dumps(rec,ensure_ascii=False)+'\n')
 
 from langchain_core.tools import tool
 from langchain_openai import  ChatOpenAI
@@ -37,6 +48,7 @@ SYSTEM="""你是调研助手，给定一个主题，你自己搜索、阅读，�
 def search_web(query: str, count: int = 6) -> str:
     """搜索网页，返回标题、摘要（约600字）、发布日期、URL 和编号。想看全文需再用 read_page。"""
     global _next_idx
+    t0=time.time()
     mem = CURRENT["mem"]
 
     kept, _ = filter_results(search_raw(query, count=count * 2))
@@ -60,11 +72,14 @@ def search_web(query: str, count: int = 6) -> str:
             "date": (r.get("date") or "")[:10],
             "url": r.get("url"),
         })
+
+    _log("tool",name="search_web",ms=round((time.time()-t0)*1000),n=len(out))
     return json.dumps(out, ensure_ascii=False)
 
 @tool
 def read_page(idx: int, start: int = 0) -> str:
     """按编号读取某条搜索结果的正文，单次最多返回 2000 字，超出需用 start 翻页。"""
+    t0=time.time()
     r = POOL.get(int(idx))
     if not r:
         return json.dumps({"error": f"编号 {idx} 不存在，请先用 search_web"}, ensure_ascii=False)
@@ -74,6 +89,8 @@ def read_page(idx: int, start: int = 0) -> str:
 
     content = text_of(r)
     part = content[start:start + MAX_PAGE_CHARS]
+
+    _log("tool",name="read_page",ms=round((time.time()-t0)*1000),idx=idx)
     return json.dumps({
         "idx": idx,
         "title": r.get("title"),
@@ -94,8 +111,17 @@ llm=ChatOpenAI(
 
 def agent_node(state:MessagesState):
     """调模型：给它 system + 全部历史，它决定调工具还是写报告"""
+    # resp=llm.invoke([("system",SYSTEM)]+state["messages"])
+    # return {"messages":[resp]}
+    t0=time.time()
     resp=llm.invoke([("system",SYSTEM)]+state["messages"])
-    return {"messages":[resp]}
+    u=getattr(resp,"usage_metadata",None) or {}
+    _log("llm",
+         ms=round((time.time()-t0)*1000),
+         in_tok=u.get("input_tokens",0),
+         out_tok=u.get("output_tokens",0),
+         tool_calls=len(getattr(resp,"tool_calls",None) or []))
+    return{"messages":[resp]}
 
 def build_graph():
     g=StateGraph(MessagesState)
